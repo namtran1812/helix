@@ -1,8 +1,11 @@
+use helix::ir::Lowerer;
 use helix::lexer::Lexer;
 use helix::parser::Parser;
+use helix::runtime::Interpreter;
+use helix::types::TypeChecker;
 
 fn main() {
-    let source = "let x = 10; return x + 20 * 2;";
+    let source = "let x = 10; let y = x + 20; return y * 2;";
 
     let mut lexer = Lexer::new(source);
 
@@ -12,5 +15,15 @@ fn main() {
 
     let program = parser.parse_program().expect("parsing failed");
 
-    println!("{program:#?}");
+    let mut checker = TypeChecker::new();
+
+    let typed = checker.check(&program).expect("semantic analysis failed");
+
+    let ir = Lowerer::lower(&typed);
+
+    let mut interpreter = Interpreter::new();
+
+    let result = interpreter.execute(&ir).expect("execution failed");
+
+    println!("{result}");
 }
