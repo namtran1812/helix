@@ -101,6 +101,7 @@ impl SsaLowerer {
     fn lower_value(&mut self, value: &IrValue) -> Operand {
         match value {
             IrValue::Constant { value, .. } => Operand::Constant(*value),
+            IrValue::Boolean { value, .. } => Operand::Constant(i64::from(*value)),
 
             IrValue::Symbol { symbol_id, .. } => *self
                 .symbols
@@ -406,5 +407,17 @@ fn fold_binary(op: BinaryOp, left: i64, right: i64) -> Option<i64> {
                 left.checked_div(right)
             }
         }
+
+        BinaryOp::Equal => Some(i64::from(left == right)),
+
+        BinaryOp::NotEqual => Some(i64::from(left != right)),
+
+        BinaryOp::Less => Some(i64::from(left < right)),
+
+        BinaryOp::LessEqual => Some(i64::from(left <= right)),
+
+        BinaryOp::Greater => Some(i64::from(left > right)),
+
+        BinaryOp::GreaterEqual => Some(i64::from(left >= right)),
     }
 }

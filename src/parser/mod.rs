@@ -37,6 +37,7 @@ impl Parser {
         match self.peek() {
             Some(Token::Let) => self.parse_let(),
             Some(Token::Return) => self.parse_return(),
+            Some(Token::If) => self.parse_if(),
             Some(token) => Err(ParseError::UnexpectedToken(token.clone())),
             None => Err(ParseError::UnexpectedEof),
         }
@@ -68,6 +69,41 @@ impl Parser {
         self.expect(Token::Semicolon)?;
 
         Ok(Statement::Return(value))
+    }
+
+    fn parse_if(&mut self) -> Result<Statement, ParseError> {
+        self.advance();
+
+        let condition = self.parse_expression(0)?;
+
+        self.expect(Token::LeftBrace)?;
+        let then_branch = self.parse_block()?;
+
+        self.expect(Token::Else)?;
+        self.expect(Token::LeftBrace)?;
+        let else_branch = self.parse_block()?;
+
+        Ok(Statement::If {
+            condition,
+            then_branch,
+            else_branch,
+        })
+    }
+
+    fn parse_block(&mut self) -> Result<Vec<Statement>, ParseError> {
+        let mut statements = Vec::new();
+
+        while !matches!(self.peek(), Some(Token::RightBrace)) {
+            if matches!(self.peek(), Some(Token::Eof) | None) {
+                return Err(ParseError::UnexpectedEof);
+            }
+
+            statements.push(self.parse_statement()?);
+        }
+
+        self.expect(Token::RightBrace)?;
+
+        Ok(statements)
     }
 
     fn parse_expression(&mut self, min_precedence: u8) -> Result<Expr, ParseError> {
@@ -110,10 +146,19 @@ impl Parser {
 
     fn current_binary_op(&self) -> Option<(BinaryOp, u8)> {
         match self.peek()? {
-            Token::Plus => Some((BinaryOp::Add, 1)),
-            Token::Minus => Some((BinaryOp::Subtract, 1)),
-            Token::Star => Some((BinaryOp::Multiply, 2)),
-            Token::Slash => Some((BinaryOp::Divide, 2)),
+            Token::EqualEqual => Some((BinaryOp::Equal, 1)),
+            Token::BangEqual => Some((BinaryOp::NotEqual, 1)),
+            Token::Less => Some((BinaryOp::Less, 1)),
+            Token::LessEqual => Some((BinaryOp::LessEqual, 1)),
+            Token::Greater => Some((BinaryOp::Greater, 1)),
+            Token::GreaterEqual => Some((BinaryOp::GreaterEqual, 1)),
+
+            Token::Plus => Some((BinaryOp::Add, 2)),
+            Token::Minus => Some((BinaryOp::Subtract, 2)),
+
+            Token::Star => Some((BinaryOp::Multiply, 3)),
+            Token::Slash => Some((BinaryOp::Divide, 3)),
+
             _ => None,
         }
     }

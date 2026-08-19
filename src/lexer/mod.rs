@@ -2,6 +2,10 @@
 pub enum Token {
     Let,
     Return,
+    If,
+    Else,
+    True,
+    False,
     Identifier(String),
     Integer(i64),
     Plus,
@@ -9,9 +13,17 @@ pub enum Token {
     Star,
     Slash,
     Equal,
+    EqualEqual,
+    BangEqual,
+    Less,
+    LessEqual,
+    Greater,
+    GreaterEqual,
     Semicolon,
     LeftParen,
     RightParen,
+    LeftBrace,
+    RightBrace,
     Eof,
 }
 
@@ -80,7 +92,39 @@ impl<'a> Lexer<'a> {
             }
             b'=' => {
                 self.position += 1;
-                Ok(Token::Equal)
+                if self.peek() == Some(b'=') {
+                    self.position += 1;
+                    Ok(Token::EqualEqual)
+                } else {
+                    Ok(Token::Equal)
+                }
+            }
+            b'!' => {
+                self.position += 1;
+                if self.peek() == Some(b'=') {
+                    self.position += 1;
+                    Ok(Token::BangEqual)
+                } else {
+                    Err(LexError::UnexpectedCharacter('!'))
+                }
+            }
+            b'<' => {
+                self.position += 1;
+                if self.peek() == Some(b'=') {
+                    self.position += 1;
+                    Ok(Token::LessEqual)
+                } else {
+                    Ok(Token::Less)
+                }
+            }
+            b'>' => {
+                self.position += 1;
+                if self.peek() == Some(b'=') {
+                    self.position += 1;
+                    Ok(Token::GreaterEqual)
+                } else {
+                    Ok(Token::Greater)
+                }
             }
             b';' => {
                 self.position += 1;
@@ -93,6 +137,14 @@ impl<'a> Lexer<'a> {
             b')' => {
                 self.position += 1;
                 Ok(Token::RightParen)
+            }
+            b'{' => {
+                self.position += 1;
+                Ok(Token::LeftBrace)
+            }
+            b'}' => {
+                self.position += 1;
+                Ok(Token::RightBrace)
             }
             b'0'..=b'9' => self.lex_integer(),
             b'a'..=b'z' | b'A'..=b'Z' | b'_' => self.lex_identifier(),
@@ -141,6 +193,10 @@ impl<'a> Lexer<'a> {
         Ok(match text {
             "let" => Token::Let,
             "return" => Token::Return,
+            "if" => Token::If,
+            "else" => Token::Else,
+            "true" => Token::True,
+            "false" => Token::False,
             _ => Token::Identifier(text.to_string()),
         })
     }

@@ -8,6 +8,11 @@ pub enum IrValue {
         ty: Type,
     },
 
+    Boolean {
+        value: bool,
+        ty: Type,
+    },
+
     Symbol {
         symbol_id: SymbolId,
         ty: Type,
@@ -24,7 +29,10 @@ pub enum IrValue {
 impl IrValue {
     pub fn ty(&self) -> Type {
         match self {
-            Self::Constant { ty, .. } | Self::Symbol { ty, .. } | Self::Binary { ty, .. } => *ty,
+            Self::Constant { ty, .. }
+            | Self::Boolean { ty, .. }
+            | Self::Symbol { ty, .. }
+            | Self::Binary { ty, .. } => *ty,
         }
     }
 }
@@ -63,6 +71,10 @@ impl Lowerer {
                 TypedStatement::Return { value } => IrInstruction::Return {
                     value: lower_expr(value),
                 },
+
+                TypedStatement::If { .. } => {
+                    panic!("control flow must be lowered through CfgBuilder")
+                }
             })
             .collect();
 
@@ -73,6 +85,11 @@ impl Lowerer {
 fn lower_expr(expr: &TypedExpr) -> IrValue {
     match expr {
         TypedExpr::Integer { value, ty } => IrValue::Constant {
+            value: *value,
+            ty: *ty,
+        },
+
+        TypedExpr::Boolean { value, ty } => IrValue::Boolean {
             value: *value,
             ty: *ty,
         },

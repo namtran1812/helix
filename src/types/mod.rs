@@ -7,6 +7,7 @@ pub type SymbolId = u32;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Type {
     I64,
+    Bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -37,6 +38,11 @@ pub enum TypedExpr {
         ty: Type,
     },
 
+    Boolean {
+        value: bool,
+        ty: Type,
+    },
+
     Symbol {
         symbol_id: SymbolId,
         name: String,
@@ -54,16 +60,30 @@ pub enum TypedExpr {
 impl TypedExpr {
     pub fn ty(&self) -> Type {
         match self {
-            Self::Integer { ty, .. } | Self::Symbol { ty, .. } | Self::Binary { ty, .. } => *ty,
+            Self::Integer { ty, .. }
+            | Self::Boolean { ty, .. }
+            | Self::Symbol { ty, .. }
+            | Self::Binary { ty, .. } => *ty,
         }
     }
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum TypedStatement {
-    Let { symbol: Symbol, value: TypedExpr },
+    Let {
+        symbol: Symbol,
+        value: TypedExpr,
+    },
 
-    Return { value: TypedExpr },
+    Return {
+        value: TypedExpr,
+    },
+
+    If {
+        condition: TypedExpr,
+        then_branch: Vec<TypedStatement>,
+        else_branch: Vec<TypedStatement>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -92,11 +112,19 @@ pub enum SemanticError {
 
     #[error("program does not contain a return statement")]
     MissingReturn,
+
+    #[error("if condition must have type bool")]
+    NonBooleanCondition,
+
+    #[error("invalid operands for binary operator")]
+    InvalidBinaryOperands,
 }
 
 pub struct TypeChecker {
     symbols_by_name: HashMap<String, Symbol>,
+
     symbols: Vec<Symbol>,
+
     next_symbol_id: SymbolId,
 }
 
@@ -110,54 +138,17 @@ impl TypeChecker {
     pub fn new() -> Self {
         Self {
             symbols_by_name: HashMap::new(),
+
             symbols: Vec::new(),
+
             next_symbol_id: 0,
         }
     }
 
     pub fn check(&mut self, program: &Program) -> Result<TypedProgram, SemanticError> {
-        let mut statements = Vec::with_capacity(program.statements.len());
+        let statements = self.check_block(&program.statements)?;
 
-        let mut saw_return = false;
-
-        for statement in &program.statements {
-            match statement {
-                Statement::Let { name, value } => {
-                    if self.symbols_by_name.contains_key(name) {
-                        return Err(SemanticError::DuplicateBinding(name.clone()));
-                    }
-
-                    let typed_value = self.check_expr(value)?;
-
-                    let symbol = Symbol {
-                        id: self.next_symbol_id,
-                        name: name.clone(),
-                        ty: typed_value.ty(),
-                    };
-
-                    self.next_symbol_id += 1;
-
-                    self.symbols_by_name.insert(name.clone(), symbol.clone());
-
-                    self.symbols.push(symbol.clone());
-
-                    statements.push(TypedStatement::Let {
-                        symbol,
-                        value: typed_value,
-                    });
-                }
-
-                Statement::Return(value) => {
-                    let typed_value = self.check_expr(value)?;
-
-                    statements.push(TypedStatement::Return { value: typed_value });
-
-                    saw_return = true;
-                }
-            }
-        }
-
-        if !saw_return {
+        if !block_returns(&program.statements) {
             return Err(SemanticError::MissingReturn);
         }
 
@@ -167,11 +158,94 @@ impl TypeChecker {
         })
     }
 
+    fn check_block(
+        &mut self,
+        statements: &[Statement],
+    ) -> Result<Vec<TypedStatement>, SemanticError> {
+        let mut typed = Vec::with_capacity(statements.len());
+
+        for statement in statements {
+            match statement {
+                Statement::Let { name, value } => {
+                    if self.symbols_by_name.contains_key(name) {
+                        return Err(SemanticError::DuplicateBinding(name.clone()));
+                    }
+
+                    let value = self.check_expr(value)?;
+
+                    let symbol = Symbol {
+                        id: self.next_symbol_id,
+
+                        name: name.clone(),
+
+                        ty: value.ty(),
+                    };
+
+                    self.next_symbol_id += 1;
+
+                    self.symbols_by_name.insert(name.clone(), symbol.clone());
+
+                    self.symbols.push(symbol.clone());
+
+                    typed.push(TypedStatement::Let { symbol, value });
+                }
+
+                Statement::Return(value) => {
+                    typed.push(TypedStatement::Return {
+                        value: self.check_expr(value)?,
+                    });
+                }
+
+                Statement::If {
+                    condition,
+                    then_branch,
+                    else_branch,
+                } => {
+                    let condition = self.check_expr(condition)?;
+
+                    if condition.ty() != Type::Bool {
+                        return Err(SemanticError::NonBooleanCondition);
+                    }
+
+                    /*
+                     * Preserve the outer environment
+                     * while checking each branch.
+                     *
+                     * Branch-local bindings do not leak
+                     * into sibling branches.
+                     */
+                    let outer_symbols = self.symbols_by_name.clone();
+
+                    let then_branch = self.check_block(then_branch)?;
+
+                    self.symbols_by_name = outer_symbols.clone();
+
+                    let else_branch = self.check_block(else_branch)?;
+
+                    self.symbols_by_name = outer_symbols;
+
+                    typed.push(TypedStatement::If {
+                        condition,
+                        then_branch,
+                        else_branch,
+                    });
+                }
+            }
+        }
+
+        Ok(typed)
+    }
+
     fn check_expr(&self, expr: &Expr) -> Result<TypedExpr, SemanticError> {
         match expr {
             Expr::Integer(value) => Ok(TypedExpr::Integer {
                 value: *value,
                 ty: Type::I64,
+            }),
+
+            Expr::Boolean(value) => Ok(TypedExpr::Boolean {
+                value: *value,
+                ty: Type::Bool,
             }),
 
             Expr::Identifier(name) => {
@@ -182,23 +256,72 @@ impl TypeChecker {
 
                 Ok(TypedExpr::Symbol {
                     symbol_id: symbol.id(),
+
                     name: symbol.name().to_string(),
+
                     ty: symbol.ty(),
                 })
             }
 
             Expr::Binary { left, op, right } => {
-                let typed_left = self.check_expr(left)?;
+                let left = self.check_expr(left)?;
 
-                let typed_right = self.check_expr(right)?;
+                let right = self.check_expr(right)?;
+
+                let ty = binary_result_type(*op, left.ty(), right.ty())?;
 
                 Ok(TypedExpr::Binary {
-                    left: Box::new(typed_left),
+                    left: Box::new(left),
+
                     op: *op,
-                    right: Box::new(typed_right),
-                    ty: Type::I64,
+
+                    right: Box::new(right),
+
+                    ty,
                 })
             }
         }
     }
+}
+
+fn binary_result_type(op: BinaryOp, left: Type, right: Type) -> Result<Type, SemanticError> {
+    match op {
+        BinaryOp::Add | BinaryOp::Subtract | BinaryOp::Multiply | BinaryOp::Divide => {
+            if left == Type::I64 && right == Type::I64 {
+                Ok(Type::I64)
+            } else {
+                Err(SemanticError::InvalidBinaryOperands)
+            }
+        }
+
+        BinaryOp::Less | BinaryOp::LessEqual | BinaryOp::Greater | BinaryOp::GreaterEqual => {
+            if left == Type::I64 && right == Type::I64 {
+                Ok(Type::Bool)
+            } else {
+                Err(SemanticError::InvalidBinaryOperands)
+            }
+        }
+
+        BinaryOp::Equal | BinaryOp::NotEqual => {
+            if left == right {
+                Ok(Type::Bool)
+            } else {
+                Err(SemanticError::InvalidBinaryOperands)
+            }
+        }
+    }
+}
+
+fn block_returns(statements: &[Statement]) -> bool {
+    statements.iter().any(|statement| match statement {
+        Statement::Return(_) => true,
+
+        Statement::If {
+            then_branch,
+            else_branch,
+            ..
+        } => block_returns(then_branch) && block_returns(else_branch),
+
+        Statement::Let { .. } => false,
+    })
 }

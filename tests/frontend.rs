@@ -69,3 +69,69 @@ fn parser_handles_let_and_return() {
 
     assert_eq!(program.statements.len(), 2);
 }
+
+#[test]
+fn lexer_tokenizes_control_flow() {
+    let mut lexer = Lexer::new("if x >= 10 { return true; } else { return false; }");
+
+    let tokens = lexer.tokenize().unwrap();
+
+    assert!(tokens.contains(&Token::If));
+    assert!(tokens.contains(&Token::GreaterEqual));
+    assert!(tokens.contains(&Token::LeftBrace));
+    assert!(tokens.contains(&Token::Else));
+    assert!(tokens.contains(&Token::True));
+    assert!(tokens.contains(&Token::False));
+}
+
+#[test]
+fn parser_builds_if_else_ast() {
+    let mut lexer = Lexer::new("if 10 > 5 { return 1; } else { return 0; }");
+
+    let mut parser = Parser::new(lexer.tokenize().unwrap());
+
+    let program = parser.parse_program().unwrap();
+
+    assert_eq!(program.statements.len(), 1);
+
+    match &program.statements[0] {
+        Statement::If {
+            condition,
+            then_branch,
+            else_branch,
+        } => {
+            assert!(matches!(
+                condition,
+                Expr::Binary {
+                    op: BinaryOp::Greater,
+                    ..
+                }
+            ));
+
+            assert_eq!(then_branch.len(), 1);
+            assert_eq!(else_branch.len(), 1);
+        }
+
+        other => panic!("expected if statement, got {other:?}"),
+    }
+}
+
+#[test]
+fn comparison_precedence_is_lower_than_arithmetic() {
+    let mut lexer = Lexer::new("return 1 + 2 * 3 > 6;");
+
+    let mut parser = Parser::new(lexer.tokenize().unwrap());
+
+    let program = parser.parse_program().unwrap();
+
+    match &program.statements[0] {
+        Statement::Return(Expr::Binary {
+            op: BinaryOp::Greater,
+            ..
+        }) => {}
+
+        other => {
+            panic!("expected comparison at root, got {other:?}")
+        }
+    }
+}

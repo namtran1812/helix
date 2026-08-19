@@ -55,6 +55,8 @@ impl Interpreter {
         match value {
             IrValue::Constant { value, .. } => Ok(*value),
 
+            IrValue::Boolean { value, .. } => Ok(i64::from(*value)),
+
             IrValue::Symbol { symbol_id, .. } => self
                 .values
                 .get(symbol_id)
@@ -70,9 +72,7 @@ impl Interpreter {
 
                 match op {
                     BinaryOp::Add => Ok(left + right),
-
                     BinaryOp::Subtract => Ok(left - right),
-
                     BinaryOp::Multiply => Ok(left * right),
 
                     BinaryOp::Divide => {
@@ -82,6 +82,13 @@ impl Interpreter {
                             Ok(left / right)
                         }
                     }
+
+                    BinaryOp::Equal => Ok(i64::from(left == right)),
+                    BinaryOp::NotEqual => Ok(i64::from(left != right)),
+                    BinaryOp::Less => Ok(i64::from(left < right)),
+                    BinaryOp::LessEqual => Ok(i64::from(left <= right)),
+                    BinaryOp::Greater => Ok(i64::from(left > right)),
+                    BinaryOp::GreaterEqual => Ok(i64::from(left >= right)),
                 }
             }
         }
@@ -122,9 +129,7 @@ impl SsaInterpreter {
 
                     let value = match op {
                         BinaryOp::Add => left + right,
-
                         BinaryOp::Subtract => left - right,
-
                         BinaryOp::Multiply => left * right,
 
                         BinaryOp::Divide => {
@@ -134,6 +139,13 @@ impl SsaInterpreter {
 
                             left / right
                         }
+
+                        BinaryOp::Equal => i64::from(left == right),
+                        BinaryOp::NotEqual => i64::from(left != right),
+                        BinaryOp::Less => i64::from(left < right),
+                        BinaryOp::LessEqual => i64::from(left <= right),
+                        BinaryOp::Greater => i64::from(left > right),
+                        BinaryOp::GreaterEqual => i64::from(left >= right),
                     };
 
                     self.values.insert(*result, value);
