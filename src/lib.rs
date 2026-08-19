@@ -1,6 +1,7 @@
 pub mod ast;
 pub mod cfg;
 pub mod cfg_opt;
+pub mod cfg_runtime;
 pub mod dominance;
 pub mod ir;
 pub mod lexer;
