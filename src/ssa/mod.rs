@@ -199,18 +199,18 @@ fn constant_fold(program: &SsaProgram) -> (SsaProgram, usize) {
 
                 let right = resolve_constant(*right, &constants);
 
-                if let (Operand::Constant(lhs), Operand::Constant(rhs)) = (left, right) {
-                    if let Some(value) = fold_binary(*op, lhs, rhs) {
-                        constants.insert(*result, value);
+                if let (Operand::Constant(lhs), Operand::Constant(rhs)) = (left, right)
+                    && let Some(value) = fold_binary(*op, lhs, rhs)
+                {
+                    constants.insert(*result, value);
 
-                        instructions.push(SsaInstruction::Copy {
-                            result: *result,
-                            source: Operand::Constant(value),
-                        });
+                    instructions.push(SsaInstruction::Copy {
+                        result: *result,
+                        source: Operand::Constant(value),
+                    });
 
-                        folded += 1;
-                        continue;
-                    }
+                    folded += 1;
+                    continue;
                 }
 
                 instructions.push(SsaInstruction::Binary {
