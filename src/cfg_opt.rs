@@ -328,13 +328,13 @@ fn simplify_phis(graph: &mut ControlFlowGraph) -> usize {
             {
                 incomings.retain(|(predecessor, _)| live_predecessors.contains(predecessor));
 
-                if incomings.len() == 1 {
-                    replacements.insert(*result, incomings[0].1);
-                } else if !incomings.is_empty()
-                    && incomings
-                        .iter()
-                        .all(|(_, operand)| *operand == incomings[0].1)
-                {
+                let trivial_phi = incomings.len() == 1
+                    || (!incomings.is_empty()
+                        && incomings
+                            .iter()
+                            .all(|(_, operand)| *operand == incomings[0].1));
+
+                if trivial_phi {
                     replacements.insert(*result, incomings[0].1);
                 }
             }
