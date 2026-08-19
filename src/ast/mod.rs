@@ -30,6 +30,10 @@ pub enum Statement {
         name: String,
         value: Expr,
     },
+    Assign {
+        name: String,
+        value: Expr,
+    },
     Return(Expr),
     If {
         condition: Expr,

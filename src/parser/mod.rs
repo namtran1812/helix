@@ -36,6 +36,7 @@ impl Parser {
     fn parse_statement(&mut self) -> Result<Statement, ParseError> {
         match self.peek() {
             Some(Token::Let) => self.parse_let(),
+            Some(Token::Identifier(_)) => self.parse_assignment(),
             Some(Token::Return) => self.parse_return(),
             Some(Token::If) => self.parse_if(),
             Some(token) => Err(ParseError::UnexpectedToken(token.clone())),
@@ -59,6 +60,20 @@ impl Parser {
         self.expect(Token::Semicolon)?;
 
         Ok(Statement::Let { name, value })
+    }
+
+    fn parse_assignment(&mut self) -> Result<Statement, ParseError> {
+        let name = match self.advance() {
+            Some(Token::Identifier(name)) => name,
+            Some(token) => return Err(ParseError::UnexpectedToken(token)),
+            None => return Err(ParseError::UnexpectedEof),
+        };
+
+        self.expect(Token::Equal)?;
+        let value = self.parse_expression(0)?;
+        self.expect(Token::Semicolon)?;
+
+        Ok(Statement::Assign { name, value })
     }
 
     fn parse_return(&mut self) -> Result<Statement, ParseError> {

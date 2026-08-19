@@ -1,4 +1,4 @@
-use helix::cfg::{CfgBuilder, Terminator};
+use helix::cfg::{CfgBuilder, Instruction, Operand, Terminator};
 use helix::lexer::Lexer;
 use helix::parser::Parser;
 use helix::types::TypeChecker;
@@ -109,4 +109,151 @@ fn symbol_use_resolves_to_definition_operand() {
     let entry = cfg.block(0).unwrap();
 
     assert!(!entry.instructions().is_empty());
+}
+
+#[test]
+fn divergent_branch_assignments_create_phi() {
+    let cfg = build(
+        "
+        let x = 0;
+
+        if 10 > 5 {
+            x = 10;
+        } else {
+            x = 20;
+        }
+
+        return x;
+        ",
+    );
+
+    let merge = cfg
+        .blocks()
+        .iter()
+        .find(|block| {
+            block
+                .instructions()
+                .iter()
+                .any(|instruction| matches!(instruction, Instruction::Phi { .. }))
+        })
+        .expect("expected phi merge block");
+
+    let (phi_result, incomings) = merge
+        .instructions()
+        .iter()
+        .find_map(|instruction| match instruction {
+            Instruction::Phi {
+                result, incomings, ..
+            } => Some((*result, incomings)),
+            _ => None,
+        })
+        .expect("expected phi");
+
+    assert_eq!(incomings.len(), 2);
+
+    assert!(matches!(
+        merge.terminator(),
+        Some(
+            Terminator::Return(
+                Operand::Value(value)
+            )
+        ) if *value == phi_result
+    ));
+}
+
+#[test]
+fn identical_branch_values_do_not_create_phi() {
+    let cfg = build(
+        "
+        let x = 7;
+
+        if 10 > 5 {
+            x = 7;
+        } else {
+            x = 7;
+        }
+
+        return x;
+        ",
+    );
+
+    let count = cfg
+        .blocks()
+        .iter()
+        .flat_map(|block| block.instructions())
+        .filter(|instruction| matches!(instruction, Instruction::Phi { .. }))
+        .count();
+
+    assert_eq!(count, 0);
+}
+
+#[test]
+fn phi_inputs_are_cfg_predecessors() {
+    let cfg = build(
+        "
+        let x = 0;
+
+        if 10 > 5 {
+            x = 1;
+        } else {
+            x = 2;
+        }
+
+        return x;
+        ",
+    );
+
+    let merge = cfg
+        .blocks()
+        .iter()
+        .find(|block| {
+            block
+                .instructions()
+                .iter()
+                .any(|instruction| matches!(instruction, Instruction::Phi { .. }))
+        })
+        .expect("expected phi merge");
+
+    let incomings = merge
+        .instructions()
+        .iter()
+        .find_map(|instruction| match instruction {
+            Instruction::Phi { incomings, .. } => Some(incomings),
+            _ => None,
+        })
+        .unwrap();
+
+    let predecessors = cfg.predecessors(merge.id());
+
+    assert_eq!(incomings.len(), predecessors.len());
+
+    for (predecessor, _) in incomings {
+        assert!(predecessors.contains(predecessor));
+    }
+}
+
+#[test]
+fn one_live_branch_does_not_require_phi() {
+    let cfg = build(
+        "
+        let x = 0;
+
+        if 10 > 5 {
+            return 1;
+        } else {
+            x = 20;
+        }
+
+        return x;
+        ",
+    );
+
+    let count = cfg
+        .blocks()
+        .iter()
+        .flat_map(|block| block.instructions())
+        .filter(|instruction| matches!(instruction, Instruction::Phi { .. }))
+        .count();
+
+    assert_eq!(count, 0);
 }

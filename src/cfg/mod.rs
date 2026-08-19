@@ -21,6 +21,12 @@ pub enum Instruction {
         right: Operand,
     },
 
+    Phi {
+        result: ValueId,
+        symbol_id: SymbolId,
+        incomings: Vec<(BlockId, Operand)>,
+    },
+
     Bind {
         symbol_id: SymbolId,
         value: Operand,
@@ -190,6 +196,19 @@ impl CfgBuilder {
                     self.definitions.insert(symbol.id(), value);
                 }
 
+                TypedStatement::Assign { symbol, value } => {
+                    let value = self.lower_expr(value);
+
+                    self.current_block_mut()
+                        .instructions
+                        .push(Instruction::Bind {
+                            symbol_id: symbol.id(),
+                            value,
+                        });
+
+                    self.definitions.insert(symbol.id(), value);
+                }
+
                 TypedStatement::Return { value } => {
                     let value = self.lower_expr(value);
 
@@ -225,21 +244,94 @@ impl CfgBuilder {
             else_block,
         });
 
+        let incoming_definitions = self.definitions.clone();
+
+        /*
+         * Lower THEN with an independent definition environment.
+         */
         self.current = then_block;
+        self.definitions = incoming_definitions.clone();
+
         self.lower_statements(then_branch);
 
-        if self.current_block().terminator.is_none() {
+        let then_exit = self.current;
+        let then_falls_through = self.current_block().terminator.is_none();
+
+        let then_definitions = self.definitions.clone();
+
+        if then_falls_through {
             self.current_block_mut().terminator = Some(Terminator::Jump(merge_block));
         }
 
+        /*
+         * Lower ELSE from the same incoming environment,
+         * not from the THEN environment.
+         */
         self.current = else_block;
+        self.definitions = incoming_definitions.clone();
+
         self.lower_statements(else_branch);
 
-        if self.current_block().terminator.is_none() {
+        let else_exit = self.current;
+        let else_falls_through = self.current_block().terminator.is_none();
+
+        let else_definitions = self.definitions.clone();
+
+        if else_falls_through {
             self.current_block_mut().terminator = Some(Terminator::Jump(merge_block));
         }
 
         self.current = merge_block;
+
+        /*
+         * Merge branch-local definitions into SSA values.
+         *
+         * Equal incoming definitions can be reused directly.
+         * Divergent definitions require a phi at the merge.
+         */
+        self.definitions = incoming_definitions.clone();
+
+        if then_falls_through && else_falls_through {
+            let mut symbols = BTreeSet::new();
+
+            symbols.extend(then_definitions.keys().copied());
+
+            symbols.extend(else_definitions.keys().copied());
+
+            for symbol_id in symbols {
+                let then_value = then_definitions.get(&symbol_id).copied();
+
+                let else_value = else_definitions.get(&symbol_id).copied();
+
+                match (then_value, else_value) {
+                    (Some(then_value), Some(else_value)) if then_value == else_value => {
+                        self.definitions.insert(symbol_id, then_value);
+                    }
+
+                    (Some(then_value), Some(else_value)) => {
+                        let result = self.allocate_value();
+
+                        self.current_block_mut()
+                            .instructions
+                            .push(Instruction::Phi {
+                                result,
+                                symbol_id,
+                                incomings: vec![(then_exit, then_value), (else_exit, else_value)],
+                            });
+
+                        self.definitions.insert(symbol_id, Operand::Value(result));
+                    }
+
+                    _ => {
+                        self.definitions.remove(&symbol_id);
+                    }
+                }
+            }
+        } else if then_falls_through {
+            self.definitions = then_definitions;
+        } else if else_falls_through {
+            self.definitions = else_definitions;
+        }
     }
 
     fn lower_expr(&mut self, expr: &TypedExpr) -> Operand {

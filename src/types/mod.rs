@@ -75,6 +75,10 @@ pub enum TypedStatement {
         value: TypedExpr,
     },
 
+    Assign {
+        symbol: Symbol,
+        value: TypedExpr,
+    },
     Return {
         value: TypedExpr,
     },
@@ -118,6 +122,9 @@ pub enum SemanticError {
 
     #[error("invalid operands for binary operator")]
     InvalidBinaryOperands,
+
+    #[error("assignment type does not match variable type")]
+    InvalidAssignmentType,
 }
 
 pub struct TypeChecker {
@@ -190,6 +197,21 @@ impl TypeChecker {
                     typed.push(TypedStatement::Let { symbol, value });
                 }
 
+                Statement::Assign { name, value } => {
+                    let symbol = self
+                        .symbols_by_name
+                        .get(name)
+                        .cloned()
+                        .ok_or_else(|| SemanticError::UndefinedIdentifier(name.clone()))?;
+
+                    let value = self.check_expr(value)?;
+
+                    if value.ty() != symbol.ty() {
+                        return Err(SemanticError::InvalidAssignmentType);
+                    }
+
+                    typed.push(TypedStatement::Assign { symbol, value });
+                }
                 Statement::Return(value) => {
                     typed.push(TypedStatement::Return {
                         value: self.check_expr(value)?,
@@ -322,6 +344,6 @@ fn block_returns(statements: &[Statement]) -> bool {
             ..
         } => block_returns(then_branch) && block_returns(else_branch),
 
-        Statement::Let { .. } => false,
+        Statement::Let { .. } | Statement::Assign { .. } => false,
     })
 }

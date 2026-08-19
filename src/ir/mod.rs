@@ -67,6 +67,10 @@ impl Lowerer {
                     symbol_id: symbol.id(),
                     value: lower_expr(value),
                 },
+                TypedStatement::Assign { symbol, value } => IrInstruction::Bind {
+                    symbol_id: symbol.id(),
+                    value: lower_expr(value),
+                },
 
                 TypedStatement::Return { value } => IrInstruction::Return {
                     value: lower_expr(value),
