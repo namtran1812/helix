@@ -87,3 +87,82 @@ impl Interpreter {
         }
     }
 }
+
+use crate::ssa::{Operand, SsaInstruction, SsaProgram, ValueId};
+
+pub struct SsaInterpreter {
+    values: HashMap<ValueId, i64>,
+}
+
+impl Default for SsaInterpreter {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl SsaInterpreter {
+    pub fn new() -> Self {
+        Self {
+            values: HashMap::new(),
+        }
+    }
+
+    pub fn execute(&mut self, program: &SsaProgram) -> Result<i64, RuntimeError> {
+        for instruction in program.instructions() {
+            match instruction {
+                SsaInstruction::Binary {
+                    result,
+                    op,
+                    left,
+                    right,
+                } => {
+                    let left = self.operand(*left)?;
+
+                    let right = self.operand(*right)?;
+
+                    let value = match op {
+                        BinaryOp::Add => left + right,
+
+                        BinaryOp::Subtract => left - right,
+
+                        BinaryOp::Multiply => left * right,
+
+                        BinaryOp::Divide => {
+                            if right == 0 {
+                                return Err(RuntimeError::DivisionByZero);
+                            }
+
+                            left / right
+                        }
+                    };
+
+                    self.values.insert(*result, value);
+                }
+
+                SsaInstruction::Copy { result, source } => {
+                    let value = self.operand(*source)?;
+
+                    self.values.insert(*result, value);
+                }
+
+                SsaInstruction::Return { value } => {
+                    return self.operand(*value);
+                }
+            }
+        }
+
+        Err(RuntimeError::MissingReturn)
+    }
+
+    fn operand(&self, operand: Operand) -> Result<i64, RuntimeError> {
+        match operand {
+            Operand::Constant(value) => Ok(value),
+
+            Operand::Value(id) => self
+                .values
+                .get(&id)
+                .copied()
+                .ok_or(RuntimeError::UndefinedSymbol(id)),
+        }
+    }
+}
