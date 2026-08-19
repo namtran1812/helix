@@ -91,3 +91,77 @@ fn optimizer_reports_instruction_statistics() {
 
     assert!(stats.constants_propagated > 0);
 }
+
+#[test]
+fn one_input_phi_is_eliminated_after_branch_pruning() {
+    let cfg = build(
+        "
+        let x = 0;
+
+        if 10 > 5 {
+            x = 10;
+        } else {
+            x = 20;
+        }
+
+        return x;
+        ",
+    );
+
+    let (optimized, stats) = CfgOptimizer::optimize(&cfg);
+
+    let phi_count = optimized
+        .blocks()
+        .iter()
+        .flat_map(|block| block.instructions())
+        .filter(|instruction| matches!(instruction, helix::cfg::Instruction::Phi { .. }))
+        .count();
+
+    assert_eq!(phi_count, 0);
+    assert!(stats.phis_eliminated >= 1);
+}
+
+#[test]
+fn dead_binary_instruction_is_removed() {
+    let cfg = build(
+        "
+        let unused = 10 + 20;
+        return 7;
+        ",
+    );
+
+    let (optimized, stats) = CfgOptimizer::optimize(&cfg);
+
+    assert!(
+        optimized
+            .blocks()
+            .iter()
+            .flat_map(|block| block.instructions())
+            .all(|instruction| { !matches!(instruction, helix::cfg::Instruction::Binary { .. }) })
+    );
+
+    assert!(stats.dead_instructions_removed >= 1);
+}
+
+#[test]
+fn optimizer_reduces_constant_cfg() {
+    let cfg = build(
+        "
+        let x = 10 + 20;
+
+        if x > 5 {
+            return x;
+        } else {
+            return 0;
+        }
+        ",
+    );
+
+    let (_, stats) = CfgOptimizer::optimize(&cfg);
+
+    assert!(stats.blocks_after < stats.blocks_before);
+
+    assert!(stats.instructions_after < stats.instructions_before);
+
+    assert!(stats.instruction_reduction_percent() > 0.0);
+}

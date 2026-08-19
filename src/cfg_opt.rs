@@ -20,6 +20,8 @@ pub struct CfgOptimizationStats {
     pub phis_after: usize,
     pub branches_folded: usize,
     pub constants_propagated: usize,
+    pub phis_eliminated: usize,
+    pub dead_instructions_removed: usize,
 }
 
 impl CfgOptimizationStats {
@@ -50,7 +52,9 @@ impl CfgOptimizer {
 
         graph.prune_unreachable();
 
-        simplify_phis(&mut graph);
+        let phis_eliminated = simplify_phis(&mut graph);
+
+        let dead_instructions_removed = eliminate_dead_instructions(&mut graph);
 
         let stats = CfgOptimizationStats {
             blocks_before,
@@ -61,6 +65,8 @@ impl CfgOptimizer {
             phis_after: phi_count(&graph),
             branches_folded,
             constants_propagated,
+            phis_eliminated,
+            dead_instructions_removed,
         };
 
         (graph, stats)
@@ -296,12 +302,16 @@ fn fold_branches(
     folded
 }
 
-fn simplify_phis(graph: &mut ControlFlowGraph) {
+fn simplify_phis(graph: &mut ControlFlowGraph) -> usize {
     let predecessors: HashMap<_, _> = graph
         .blocks()
         .iter()
         .map(|block| (block.id(), graph.predecessors(block.id())))
         .collect();
+
+    let mut replacements = HashMap::<ValueId, Operand>::new();
+
+    let mut eliminated = 0;
 
     for block in graph.blocks_mut() {
         let live_predecessors: HashSet<_> = predecessors
@@ -312,10 +322,214 @@ fn simplify_phis(graph: &mut ControlFlowGraph) {
             .collect();
 
         for instruction in block.instructions_mut() {
-            if let Instruction::Phi { incomings, .. } = instruction {
+            if let Instruction::Phi {
+                result, incomings, ..
+            } = instruction
+            {
                 incomings.retain(|(predecessor, _)| live_predecessors.contains(predecessor));
+
+                if incomings.len() == 1 {
+                    replacements.insert(*result, incomings[0].1);
+                } else if !incomings.is_empty()
+                    && incomings
+                        .iter()
+                        .all(|(_, operand)| *operand == incomings[0].1)
+                {
+                    replacements.insert(*result, incomings[0].1);
+                }
             }
         }
+    }
+
+    if replacements.is_empty() {
+        return 0;
+    }
+
+    for block in graph.blocks_mut() {
+        for instruction in block.instructions_mut() {
+            rewrite_instruction_replacements(instruction, &replacements);
+        }
+
+        if let Some(terminator) = block.terminator_mut() {
+            rewrite_terminator_replacements(terminator, &replacements);
+        }
+
+        let before = block.instructions().len();
+
+        block.instructions_mut().retain(|instruction| {
+            !matches!(
+                instruction,
+                Instruction::Phi {
+                    result,
+                    ..
+                } if replacements.contains_key(result)
+            )
+        });
+
+        eliminated += before - block.instructions().len();
+    }
+
+    eliminated
+}
+
+fn rewrite_instruction_replacements(
+    instruction: &mut Instruction,
+    replacements: &HashMap<ValueId, Operand>,
+) {
+    match instruction {
+        Instruction::Binary { left, right, .. } => {
+            resolve_replacement(left, replacements);
+
+            resolve_replacement(right, replacements);
+        }
+
+        Instruction::Phi { incomings, .. } => {
+            for (_, operand) in incomings {
+                resolve_replacement(operand, replacements);
+            }
+        }
+
+        Instruction::Bind { value, .. } => {
+            resolve_replacement(value, replacements);
+        }
+    }
+}
+
+fn rewrite_terminator_replacements(
+    terminator: &mut Terminator,
+    replacements: &HashMap<ValueId, Operand>,
+) {
+    match terminator {
+        Terminator::Return(value)
+        | Terminator::Branch {
+            condition: value, ..
+        } => {
+            resolve_replacement(value, replacements);
+        }
+
+        Terminator::Jump(_) => {}
+    }
+}
+
+fn resolve_replacement(operand: &mut Operand, replacements: &HashMap<ValueId, Operand>) {
+    let mut visited = HashSet::new();
+
+    while let Operand::Value(id) = *operand {
+        if !visited.insert(id) {
+            break;
+        }
+
+        let Some(next) = replacements.get(&id) else {
+            break;
+        };
+
+        *operand = *next;
+    }
+}
+
+fn eliminate_dead_instructions(graph: &mut ControlFlowGraph) -> usize {
+    let mut live = HashSet::<ValueId>::new();
+
+    /*
+     * Seed liveness from terminators and phi inputs.
+     */
+    for block in graph.blocks() {
+        if let Some(terminator) = block.terminator() {
+            match terminator {
+                Terminator::Return(value)
+                | Terminator::Branch {
+                    condition: value, ..
+                } => {
+                    mark_cfg_operand(*value, &mut live);
+                }
+
+                Terminator::Jump(_) => {}
+            }
+        }
+
+        for instruction in block.instructions() {
+            if let Instruction::Phi { incomings, .. } = instruction {
+                for (_, operand) in incomings {
+                    mark_cfg_operand(*operand, &mut live);
+                }
+            }
+        }
+    }
+
+    /*
+     * Fixed point because values may be defined in
+     * predecessor blocks.
+     */
+    loop {
+        let before = live.len();
+
+        for block in graph.blocks().iter().rev() {
+            for instruction in block.instructions().iter().rev() {
+                match instruction {
+                    Instruction::Binary {
+                        result,
+                        left,
+                        right,
+                        ..
+                    } => {
+                        if live.contains(result) {
+                            mark_cfg_operand(*left, &mut live);
+
+                            mark_cfg_operand(*right, &mut live);
+                        }
+                    }
+
+                    Instruction::Phi {
+                        result, incomings, ..
+                    } => {
+                        if live.contains(result) {
+                            for (_, operand) in incomings {
+                                mark_cfg_operand(*operand, &mut live);
+                            }
+                        }
+                    }
+
+                    Instruction::Bind { value, .. } => {
+                        mark_cfg_operand(*value, &mut live);
+                    }
+                }
+            }
+        }
+
+        if live.len() == before {
+            break;
+        }
+    }
+
+    let mut removed = 0;
+
+    for block in graph.blocks_mut() {
+        let before = block.instructions().len();
+
+        block.instructions_mut().retain(|instruction| {
+            match instruction {
+                Instruction::Binary { result, .. } | Instruction::Phi { result, .. } => {
+                    live.contains(result)
+                }
+
+                /*
+                 * Bind retains source-level state.
+                 * We eliminate these later once CFG
+                 * SSA fully replaces symbol binds.
+                 */
+                Instruction::Bind { .. } => true,
+            }
+        });
+
+        removed += before - block.instructions().len();
+    }
+
+    removed
+}
+
+fn mark_cfg_operand(operand: Operand, live: &mut HashSet<ValueId>) {
+    if let Operand::Value(id) = operand {
+        live.insert(id);
     }
 }
 
