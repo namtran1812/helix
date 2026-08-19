@@ -1,0 +1,17 @@
+metric,value
+programs,1288
+semantically_equivalent,1288
+blocks_before,3105
+blocks_after,2332
+block_reduction_percent,24.90
+instructions_before,7004
+instructions_after,1677
+instruction_reduction_percent,76.06
+phis_before,289
+phis_after,0
+phi_reduction_percent,100.00
+branches_folded,755
+constants_propagated,5323
+phis_eliminated,289
+dead_instructions_removed,3768
+distinct_results,135
