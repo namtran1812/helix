@@ -1,5 +1,6 @@
 pub mod ast;
 pub mod cfg;
+pub mod cfg_opt;
 pub mod dominance;
 pub mod ir;
 pub mod lexer;

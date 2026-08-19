@@ -65,6 +65,14 @@ impl BasicBlock {
     pub fn terminator(&self) -> Option<&Terminator> {
         self.terminator.as_ref()
     }
+
+    pub(crate) fn instructions_mut(&mut self) -> &mut Vec<Instruction> {
+        &mut self.instructions
+    }
+
+    pub(crate) fn terminator_mut(&mut self) -> &mut Option<Terminator> {
+        &mut self.terminator
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -134,6 +142,10 @@ impl ControlFlowGraph {
         let reachable = self.reachable_blocks();
 
         self.blocks.retain(|block| reachable.contains(&block.id()));
+    }
+
+    pub(crate) fn blocks_mut(&mut self) -> &mut Vec<BasicBlock> {
+        &mut self.blocks
     }
 }
 
